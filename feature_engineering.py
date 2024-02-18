@@ -76,7 +76,7 @@ TA_all = tautil.get_stationary_ta_windows(df, windows).dropna()
 
 TA = tautil.remove_stationary_ta(TA_all)
 print(TA.describe())
-print('Stationary feature(s) removed: ', set(TA_all).symmetric_difference(set(TA)))
+print('Non-stationary feature(s) removed: ', set(TA_all).symmetric_difference(set(TA)))
 
 
 # Original features
