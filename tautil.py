@@ -21,7 +21,7 @@ def ta_stationary_test(df_):
         result_df['{}'.format(i)] = pd.Series(adf[0:2],index=['Test Statistic','p_value'])
     return result_df.T
 
-def remove_stationary_ta(df_):
+def remove_non_stationary_ta(df_):
     result_df = ta_stationary_test(df_)
     index_check = result_df[result_df['p_value']<0.05].index
     return df_[index_check]
@@ -90,7 +90,39 @@ def get_stationary_ta_window_0(
     
     # Moving Average Convergence/Divergence
     df[f'mom_mfi_{mt}'] = MFI(high=df[high], low=df[low], close=df[close], volume=df[volume], timeperiod=mt)
+    
+    # Bollinger Bands
+    uppperband, middleband, lowerband = BBANDS(df[close], timeperiod=mt)
+    df[f'bb_upperband_{mt}'] = uppperband
+    df[f'bb_middleband_{mt}'] = middleband
+    df[f'bb_lowerband_{mt}'] = lowerband
 
+    # Double Exponential Moving Average
+    df[f'dema_{mt}'] = DEMA(df[close], timeperiod=2*mt)
+
+    # Exponential Moving Average
+    df[f'ema_{mt}'] = EMA(df[close], timeperiod=2*mt)
+
+    # Hilbert Transform - Instantaneous Trendline
+    df[f'ht_trendline_{mt}'] = HT_TRENDLINE(df[close])
+
+    # Average True Range
+    df[f'atr_{mt}'] = ATR(high=df[high], low=df[low], close=df[close], timeperiod=mt)
+
+    # Normalized Average True Range
+    df[f'natr_{mt}'] = NATR(high=df[high], low=df[low], close=df[close], timeperiod=mt)
+
+    # True Range
+    df[f'trange'] = TRANGE(high=df[high], low=df[low], close=df[close])
+
+    # Chaikin A/D Line
+    df['chaikin_ad_line'] = AD(high=df[high], low=df[low], close=df[close], volume=df[volume])
+
+    # Chaikin A/D Oscillator
+    df[f'chaikin_ad_osc_{mt}'] = ADOSC(high=df[high], low=df[low], close=df[close], volume=df[volume], fastperiod=mt, slowperiod=3*mt)
+    
+    # On Balance Volume
+    df['obv'] = OBV(df[close], df[volume])
 
     df = df.drop(columns=['open','high','low','close','volume'])
     return df.dropna()

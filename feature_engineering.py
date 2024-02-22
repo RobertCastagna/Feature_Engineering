@@ -8,6 +8,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import KFold
+from xgboost import XGBClassifier
 
 #feature
 from sklearn import preprocessing
@@ -22,21 +23,22 @@ warnings.filterwarnings(action='ignore')
 import yfinance as yf
 
 # Accuracy function for price prediction
-def get_acc(close, feature, label, model, days=5, kfold=3):
+def get_acc(close, feature, model, days=5, kfold=3):
     
-    if label == 'dir':
-        mom = np.sign(close.shift(-days)-close)
-        y = mom.copy() # choose y
-        raw_X = feature.copy() # choose X
+    mom = np.sign(close.shift(-days)-close)
+    y = mom.copy() # choose y
+    raw_X = feature.copy() # choose X
 
-        tmp_df = raw_X.join(y).dropna()
-        raw_X=tmp_df.iloc[:,:-1]
-        y=tmp_df.iloc[:,-1]
-        t1 = pd.Series(y.index, index=y.index) # if y = mom
+    if model == 'xgb':
+        y = y.map({-1: 0, 1: 1})
 
- # CV
-    k = kfold
-    cv = KFold(k)
+    tmp_df = raw_X.join(y).dropna()
+    raw_X=tmp_df.iloc[:,:-1]
+    y=tmp_df.iloc[:,-1]
+    t1 = pd.Series(y.index, index=y.index) # if y = mom
+
+    # CV
+    cv = KFold(kfold)
 
     # Scaling
     scaler = preprocessing.MinMaxScaler((0,1))
@@ -45,15 +47,18 @@ def get_acc(close, feature, label, model, days=5, kfold=3):
     X = scaled_X
 
     # Choose model
-    rfc = RandomForestClassifier(n_estimators = 200, criterion='entropy', class_weight='balanced_subsample',
-                                 bootstrap=True)
+    rfc = RandomForestClassifier(n_estimators = 200, criterion='entropy', class_weight='balanced_subsample', bootstrap=True)
     svc = SVC(probability=True)
+    xgb = XGBClassifier(n_estimators=200, max_depth=2, learning_rate=0.5, eval_metric='logloss')
+
 
     if model == 'rf':
         clf = rfc
     elif model == 'svm':
         clf = svc
-        
+    elif model == 'xgb':
+        clf = xgb
+
     accs=[]
     for train, test in cv.split(X, y):
         clf.fit(X.iloc[train],y.iloc[train])
@@ -61,12 +66,17 @@ def get_acc(close, feature, label, model, days=5, kfold=3):
         y_pred = clf.predict(X.iloc[test])
         accs.append(accuracy_score(y_true,y_pred))
         
+    feature_importances = clf.feature_importances_
+    importances_dict = dict(zip(raw_X.columns, feature_importances))
+    for name, importance in sorted(importances_dict.items(), key=lambda item: item[1], reverse=True):
+        print(f"{name}: {importance}")
+
     return np.mean(accs)
 
 
 df_ = yf.download('GOOG','2020-1-1','2024-1-1')
 df = tautil.ohlcv(df_)
-windows = [7,10,15,20,30]
+windows = [5,7,15,20]
 
 
 TA_all = tautil.get_stationary_ta_windows(df, windows).dropna()
@@ -74,7 +84,7 @@ TA_all = tautil.get_stationary_ta_windows(df, windows).dropna()
 # st_test = tautil.ta_stationary_test(TA)
 # print(st_test)
 
-TA = tautil.remove_stationary_ta(TA_all)
+TA = tautil.remove_non_stationary_ta(TA_all)
 print(TA.describe())
 print('Non-stationary feature(s) removed: ', set(TA_all).symmetric_difference(set(TA)))
 
@@ -82,35 +92,37 @@ print('Non-stationary feature(s) removed: ', set(TA_all).symmetric_difference(se
 # Original features
 feature = TA.copy()
 close = df.close
-raw_acc = get_acc(close, feature, label='dir',model='rf')
+raw_acc = get_acc(close, feature, model='xgb')
 print("Original features acc score: ", raw_acc)
 
 
-scaler = preprocessing.StandardScaler()
-TA_ = scaler.fit_transform(TA)
+# -------------------------- Component Decomposition (PCA, NMF)    
 
-mask = np.isnan(TA_)
-TA_ = TA_[~mask.any(axis=1)]
+# scaler = preprocessing.StandardScaler()
+# TA_ = scaler.fit_transform(TA)
 
-# Linear PCA
-pca = PCA(n_components=3)
-pca_TA = pca.fit_transform(TA_)
-feature_weights = pca.components_
-pca_TA = pd.DataFrame(pca_TA, index=TA.dropna().index)
+# mask = np.isnan(TA_)
+# TA_ = TA_[~mask.any(axis=1)]
 
-feature = pca_TA.copy()
-close = df.close
-pca_acc = get_acc(close, feature, label='dir', model='rf')
-print("PCA features acc score: ", pca_acc)
+# # Linear PCA
+# pca = PCA(n_components=3)
+# pca_TA = pca.fit_transform(TA_)
+# feature_weights = pca.components_
+# pca_TA = pd.DataFrame(pca_TA, index=TA.dropna().index)
 
-# Non-negative matrix factorization
-nmf = NMF(n_components=10)
-TA_ = np.where(TA_ < 0, 0, TA_)
-nmf_TA = nmf.fit_transform(TA_)
-feature_weights = nmf.components_
-nmf_TA = pd.DataFrame(nmf_TA, index=TA.dropna().index)
+# feature = pca_TA.copy()
+# close = df.close
+# pca_acc = get_acc(close, feature, model='rf')
+# print("PCA features acc score: ", pca_acc)
 
-feature = nmf_TA.copy()
-close = df.close
-nmf_acc = get_acc(close, feature, label='dir', model='rf')
-print("NMF features acc score: ", nmf_acc)
+# # Non-negative matrix factorization
+# nmf = NMF(n_components=3)
+# TA_ = np.where(TA_ < 0, 0, TA_)
+# nmf_TA = nmf.fit_transform(TA_)
+# feature_weights = nmf.components_
+# nmf_TA = pd.DataFrame(nmf_TA, index=TA.dropna().index)
+
+# feature = nmf_TA.copy()
+# close = df.close
+# nmf_acc = get_acc(close, feature, label='dir', model='rf')
+# print("NMF features acc score: ", nmf_acc)
